@@ -8,21 +8,26 @@ module VCAP::CloudController
         logger.info('run-deployment-update')
 
         deployments = DeploymentModel.where(state: DeploymentModel::DEPLOYING_STATE)
+        workpool = WorkPool.new(50)
 
         deployments.each do |deployment|
-          begin
-            scale_deployment(deployment, logger)
-          rescue => e
-            error_name = e.is_a?(CloudController::Errors::ApiError) ? e.name : e.class.name
-            logger.error(
-              'error-scaling-deployment',
-              deployment_guid: deployment.guid,
-              error: error_name,
-              error_message: e.message,
-              backtrace: e.backtrace.join("\n")
-            )
+          workpool.submit(deployment, logger) do | d, l |
+            begin
+              scale_deployment(d, l)
+            rescue => e
+              error_name = e.is_a?(CloudController::Errors::ApiError) ? e.name : e.class.name
+              logger.error(
+                'error-scaling-deployment',
+                deployment_guid: d.guid,
+                error: error_name,
+                error_message: e.message,
+                backtrace: e.backtrace.join("\n")
+              )
+            end
           end
         end
+
+        workpool.drain
       end
 
       private_class_method

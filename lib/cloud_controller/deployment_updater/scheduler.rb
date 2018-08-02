@@ -7,6 +7,8 @@ module VCAP::CloudController
     class Scheduler
       def self.start
         config = CloudController::DependencyLocator.instance.config
+        update_frequency = config.get(:deployment_updater, :update_frequency_in_seconds)
+        logger = Steno.logger('cc.deployment_updater.scheduler')
 
         lock_runner = Locket::LockRunner.new(
           key: config.get(:deployment_updater, :lock_key),
@@ -21,8 +23,16 @@ module VCAP::CloudController
         lock_worker = Locket::LockWorker.new(lock_runner)
 
         lock_worker.acquire_lock_and do
+          t1 = Time.now
           Updater.update
-          sleep(config.get(:deployment_updater, :update_frequency_in_seconds))
+          update_duration = Time.now - t1
+          logger.info("Update loop took #{Time.now - t1}s")
+          if update_duration < update_frequency
+            logger.info("Sleeping #{update_frequency - update_duration}s")
+            sleep(update_frequency - update_duration)
+          else
+            logger.info('Not Sleeping')
+          end
         end
       end
     end
